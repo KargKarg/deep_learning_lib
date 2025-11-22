@@ -1,5 +1,6 @@
 import numpy as np
 from abc import ABC, abstractmethod
+from typing import Callable, Iterator
 
 
 class Module(ABC):
@@ -30,7 +31,7 @@ class Module(ABC):
 
 
     @abstractmethod
-    def step(self, eps: float) -> None:
+    def grad_loss_parameters(self) -> None:
         """
         """
         raise NotImplementedError
@@ -77,11 +78,32 @@ class Sequential(Module):
         return deltas
     
 
-    def step(self, eps: float) -> None:
-        [module.step(eps) for module in self.modules[::-1]]
-        return None
+    def grad_loss_parameters(self) -> list[dict[str: np.ndarray[float] |float] | None]:
+        """
+        """
+        return [module.grad_loss_parameters() for module in self.modules[::-1]]
 
 
+    def __iter__(self) -> Iterator[Module]:
+        """
+        """
+        for module in self.modules:
+            yield module
+
+    
+    def __getitem__(self, index: int | slice) -> Module:
+        """
+        """
+        return self.modules[index]
+
+
+    @property
+    def dimensions(self) -> tuple[int, int]:
+        """
+        """
+        return (self.modules[0].d_in, self.modules[-1].d_out)
+    
+    
 class Linear(Module):
     """
     """
@@ -95,15 +117,21 @@ class Linear(Module):
 
         self.has_bias = bias
 
-        self.W: np.ndarray[float] = np.random.normal(size=(d_in, d_out))
-
         match bias:
 
             case True:
-                self.bias: float = np.random.normal(size=(1,))[0]
+
+                self.parameters = {
+                    "W": np.random.normal(size=(d_in, d_out)),
+                    "b": np.random.normal(size=(1,))[0]
+                }
 
             case False:
-                self.bias: float = 0
+
+                self.parameters = {
+                    "W": np.random.normal(size=(d_in, d_out)),
+                    "b": 0
+                }
 
         return None
     
@@ -120,13 +148,13 @@ class Linear(Module):
 
                 self.N: int = x.shape[0]
                 self.x: np.ndarray[float] = np.copy(x)
-                self.value: np.ndarray[float] = np.dot(x, self.W) + self.bias
+                self.value: np.ndarray[float] = np.dot(x, self.parameters["W"]) + self.parameters["b"]
 
                 return self.value
             
             case False:
 
-                return np.dot(x, self.W) + self.bias
+                return np.dot(x, self.parameters["W"]) + self.parameters["b"]
 
 
     def backward(self, grad_loss_out: np.ndarray[float]) -> None:
@@ -138,7 +166,7 @@ class Linear(Module):
         """
         assert all(hasattr(self, attr) for attr in ("N", "x", "value")), "The forward pass tracked must be computed before the gradient."
 
-        self.grad_out_in: np.ndarray[float] = np.tile(np.copy(self.W), (self.N, 1, 1))
+        self.grad_out_in: np.ndarray[float] = np.tile(np.copy(self.parameters["W"]), (self.N, 1, 1))
 
         self.grad_out_W: np.ndarray[float] = self.x[..., None, None] * np.eye(self.d_out)
         self.grad_out_bias: np.ndarray[float] = np.ones(shape=(self.N, self.d_out))
@@ -150,35 +178,117 @@ class Linear(Module):
         return self.grad_loss_in
 
 
-    def step(self, eps: float) -> None:
+    def grad_loss_parameters(self) -> dict[str: np.ndarray[float] | float]:
         """
         """
-        
-        self.W -= eps*np.mean(np.sum((self.grad_out_W*self.grad_loss_out[:, None, None, :]), axis=3), axis=0)
-        self.bias -= int(self.has_bias)*eps*np.mean(np.sum(self.grad_loss_out*self.grad_out_bias, axis=1), axis=0)
+        return {
+            "W": np.mean(np.sum((self.grad_out_W*self.grad_loss_out[:, None, None, :]), axis=3), axis=0),
+            "b": int(self.has_bias)*np.mean(np.sum(self.grad_loss_out*self.grad_out_bias, axis=1), axis=0)
+        }
 
+
+class Sigmoid(Module):
+    """
+    """
+
+    def __init__(self, d_in: int) -> None:
+        """"
+        """
+        super().__init__(d_in, d_in)
+        self.sigm: Callable[[np.ndarray[float]], np.ndarray[float]] = lambda x: 1 / (1 + np.exp(-x))
         return None
     
 
-if __name__ == "__main__":
+    def forward(self, x: np.ndarray[float], track: bool = True) -> np.ndarray[float]:
+        """
+        dim(X) = (N, d_in)
+        """
 
-    from sklearn.datasets import make_regression
-    from loss import MSE
+        match track:
 
-    N, D, K = 100, 10, 1
+            case True:
 
-    X, Y = make_regression(n_samples=N, n_features=D, n_targets=K)
+                self.N: int = x.shape[0]
+                self.x: np.ndarray[float] = np.copy(x)
+                self.value: np.ndarray[float] = self.sigm(x)
 
-    if K == 1:  Y = Y[..., None]
+                return self.value
+            
+            case False:
 
-    NN = Sequential(Linear(D, K), Linear(K, K))
-    loss = MSE(K)
+                return self.sigm(x)
 
-    for _ in range(1000):
 
-        loss(NN(X), Y)
-        NN.backward(loss.backward())
-        
-        NN.step(1e-1)
+    def backward(self, grad_loss_out: np.ndarray[float]) -> None:
+        """
+        dim(grad_out_in) = (N, d_in, d_out)
+        dim(grad_out_W) = (N, d_in, d_out, d_out)
+        dim(grad_out_bias) = (N, d_out)
+        dim(grad_loss_out) = (N, d_out)
+        """
+        assert all(hasattr(self, attr) for attr in ("N", "x", "value")), "The forward pass tracked must be computed before the gradient."
 
-        print(loss.value)
+        self.grad_out_in: np.ndarray[float] = ((1 - self.sigm(self.x))*self.sigm(self.x))[:, :, None] * np.eye(self.d_in)
+
+        self.grad_loss_in: np.ndarray[float] = np.sum(grad_loss_out[:, None, :] * self.grad_out_in, axis=2)
+
+        return self.grad_loss_in
+
+
+    def grad_loss_parameters(self) -> None:
+        """
+        """
+        return None
+
+
+class Tanh(Module):
+    """
+    """
+
+    def __init__(self, d_in: int) -> None:
+        """"
+        """
+        super().__init__(d_in, d_in)
+        return None
+    
+
+    def forward(self, x: np.ndarray[float], track: bool = True) -> np.ndarray[float]:
+        """
+        dim(X) = (N, d_in)
+        """
+
+        match track:
+
+            case True:
+
+                self.N: int = x.shape[0]
+                self.x: np.ndarray[float] = np.copy(x)
+                self.value: np.ndarray[float] = np.tanh(x)
+
+                return self.value
+            
+            case False:
+
+                return np.tanh(x)
+
+
+    def backward(self, grad_loss_out: np.ndarray[float]) -> None:
+        """
+        dim(grad_out_in) = (N, d_in, d_out)
+        dim(grad_out_W) = (N, d_in, d_out, d_out)
+        dim(grad_out_bias) = (N, d_out)
+        dim(grad_loss_out) = (N, d_out)
+        """
+        assert all(hasattr(self, attr) for attr in ("N", "x", "value")), "The forward pass tracked must be computed before the gradient."
+
+        self.grad_out_in: np.ndarray[float] = (1 - self.value**2)[:, :, None] * np.eye(self.d_in)
+
+        self.grad_loss_in: np.ndarray[float] = np.sum(grad_loss_out[:, None, :] * self.grad_out_in, axis=2)
+
+        return self.grad_loss_in
+
+
+    def grad_loss_parameters(self) -> None:
+        """
+        """
+        return None

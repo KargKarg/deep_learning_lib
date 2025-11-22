@@ -2,9 +2,20 @@ from . import utils
 
 from .modules import (
     Sequential,
-    Linear
+    Linear,
+    Sigmoid,
+    Tanh
 )
 
-from .loss import (
-    MSE
+from .losses import (
+    MSE,
+    BCE
+)
+
+from .optimizers import (
+    SGD
+)
+
+from .trainers import (
+    Trainer
 )
