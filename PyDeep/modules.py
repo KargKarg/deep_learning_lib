@@ -292,3 +292,56 @@ class Tanh(Module):
         """
         """
         return None
+    
+
+class Softmax(Module):
+    """
+    """
+
+    def __init__(self, d_in: int, tau: int = 1) -> None:
+        """"
+        """
+        super().__init__(d_in, d_in)
+        self.tau = tau
+        return None
+    
+
+    def forward(self, x: np.ndarray[float], track: bool = True) -> np.ndarray[float]:
+        """
+        dim(X) = (N, d_in)
+        """
+
+        match track:
+
+            case True:
+
+                self.N: int = x.shape[0]
+                self.x: np.ndarray[float] = np.copy(x)
+                self.value: np.ndarray[float] = np.exp(self.tau * x)/np.sum(np.exp(self.tau * x), axis=-1, keepdims=True)
+
+                return self.value
+            
+            case False:
+
+                return np.exp(self.tau * x)/np.sum(np.exp(self.tau * x), axis=-1, keepdims=True)
+
+
+    def backward(self, grad_loss_out: np.ndarray[float]) -> None:
+        """
+        dim(grad_out_in) = (N, d_in, d_out)
+        dim(grad_out_W) = (N, d_in, d_out, d_out)
+        dim(grad_out_bias) = (N, d_out)
+        dim(grad_loss_out) = (N, d_out)
+        """
+        assert all(hasattr(self, attr) for attr in ("N", "x", "value")), "The forward pass tracked must be computed before the gradient."
+
+        self.grad_out_in: np.ndarray[float] = (self.tau*self.value*(1 - self.value))[:, :, None] * np.eye(self.d_in) + (np.ones(shape=(self.d_in, self.d_in)) - np.eye(self.d_in))*(-self.tau*self.value[:, None, :]*self.value[:, :, None])
+        self.grad_loss_in: np.ndarray[float] = np.sum(grad_loss_out[:, None, :] * self.grad_out_in, axis=2)
+
+        return self.grad_loss_in
+
+
+    def grad_loss_parameters(self) -> None:
+        """
+        """
+        return None

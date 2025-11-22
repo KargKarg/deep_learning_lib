@@ -43,7 +43,7 @@ def decision_boundary(X: np.ndarray[float], pred: Callable[[np.ndarray[float]], 
     
     grid_points = grid_points.reshape(1, -1, d)
 
-    Z = pred(grid_points)
+    Z = pred(grid_points[0])
     Z = Z.reshape(xx.shape)
 
     return xx, yy, Z

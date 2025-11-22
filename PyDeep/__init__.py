@@ -4,7 +4,8 @@ from .modules import (
     Sequential,
     Linear,
     Sigmoid,
-    Tanh
+    Tanh,
+    Softmax
 )
 
 from .losses import (
