@@ -94,7 +94,7 @@ class Sequential(Module):
     def __getitem__(self, index: int | slice) -> Module:
         """
         """
-        return self.modules[index]
+        return Sequential(*self.modules[index])
 
 
     @property
@@ -103,6 +103,42 @@ class Sequential(Module):
         """
         return (self.modules[0].d_in, self.modules[-1].d_out)
     
+
+class Concat(Module):
+    """
+    """
+
+    def __init__(self, *modules) -> None:
+        """
+        """
+        self.modules: list[Module] = [module for module in modules]
+        super().__init__(sum([module.d_in for module in self.modules]), sum([module.d_out for module in self.modules]))
+        return None
+
+    def forward(self, x: np.ndarray[float], track: bool = True) -> np.ndarray[float]:
+        """
+        """
+        assert x.shape[-1] == sum([module.d_in for module in self.modules]), ""
+        return np.concatenate([module(x[:, (dim_past := sum([m.d_in for m in self.modules[:i]])) : dim_past + module.d_in], track) for i, module in enumerate(self.modules)], axis=1)
+    
+
+    def backward(self, grad_loss_out: np.ndarray[float]) -> np.ndarray[float]:
+        """
+        """
+        return np.concatenate([module.backward(grad_loss_out[:, (dim_past := sum([m.d_out for m in self.modules[:i]])) : dim_past + module.d_out]) for i, module in enumerate(self.modules)], axis=1)
+    
+
+    def grad_loss_parameters(self) -> list[dict[str: np.ndarray[float] |float] | None]:
+        """
+        """
+        return [module.grad_loss_parameters() for module in self.modules]
+    
+
+    def __iter__(self) -> Iterator[Module]:
+        """
+        """
+        for module in self.modules:
+            yield module
     
 class Linear(Module):
     """
@@ -170,7 +206,6 @@ class Linear(Module):
 
         self.grad_out_W: np.ndarray[float] = self.x[..., None, None] * np.eye(self.d_out)
         self.grad_out_bias: np.ndarray[float] = np.ones(shape=(self.N, self.d_out))
-
         self.grad_loss_in: np.ndarray[float] = np.sum(grad_loss_out[:, None, :] * self.grad_out_in, axis=2)
 
         self.grad_loss_out = np.copy(grad_loss_out)
@@ -298,7 +333,7 @@ class Softmax(Module):
     """
     """
 
-    def __init__(self, d_in: int, tau: int = 1) -> None:
+    def __init__(self, d_in: int, tau: float = 1) -> None:
         """"
         """
         super().__init__(d_in, d_in)
@@ -341,6 +376,111 @@ class Softmax(Module):
         return self.grad_loss_in
 
 
+    def grad_loss_parameters(self) -> None:
+        """
+        """
+        return None
+    
+
+
+class LogSoftmax(Module):
+    """
+    """
+
+
+    def __init__(self, d_in: int, tau: float = 1) -> None:
+        """
+        """
+        super().__init__(d_in, d_in)
+        self.tau = tau
+        return None
+    
+
+    def forward(self, x: np.ndarray[float], track: bool = True) -> np.ndarray[float]:
+        """
+        dim(X) = (N, d_in)
+        """
+
+        match track:
+
+            case True:
+
+                self.N: int = x.shape[0]
+                self.x: np.ndarray[float] = np.copy(x)
+                self.value: np.ndarray[float] = self.tau*x - np.log(np.sum(np.exp(self.tau * x), axis=-1, keepdims=True))
+
+                return self.value
+            
+            case False:
+
+                return self.tau*x - np.log(np.sum(np.exp(self.tau * x), axis=-1, keepdims=True))
+    
+
+    def backward(self, grad_loss_out: np.ndarray[float]) -> None:
+        """
+        dim(grad_out_in) = (N, d_in, d_out)
+        dim(grad_out_W) = (N, d_in, d_out, d_out)
+        dim(grad_out_bias) = (N, d_out)
+        dim(grad_loss_out) = (N, d_out)
+        """
+        assert all(hasattr(self, attr) for attr in ("N", "x", "value")), "The forward pass tracked must be computed before the gradient."
+
+        self.grad_out_in: np.ndarray[float] = ((self.tau * np.eye(self.d_in))[None, :, :] - (self.tau*np.exp(self.tau * self.x)/np.sum(np.exp(self.tau * self.x), axis=-1, keepdims=True))[:, :, None] * np.ones(shape=(self.value.shape[0], 1, self.d_in)))
+        self.grad_loss_in: np.ndarray[float] = np.sum(grad_loss_out[:, None, :] * self.grad_out_in, axis=2)
+
+        return self.grad_loss_in
+
+
+    def grad_loss_parameters(self) -> None:
+        """
+        """
+        return None
+    
+
+class Identity(Module):
+    """
+    """
+
+    def __init__(self, d_in) -> None:
+        """
+        """
+        super().__init__(d_in, d_in)
+        return None
+    
+
+    def forward(self, x, track = True):
+        """
+        """
+
+        match track:
+
+            case True:
+
+                self.N: int = x.shape[0]
+                self.x: np.ndarray[float] = np.copy(x)
+                self.value: np.ndarray[float] = np.copy(x)
+
+                return self.value
+            
+            case False:
+
+                return x
+            
+    def backward(self, grad_loss_out: np.ndarray[float]) -> None:
+        """
+        dim(grad_out_in) = (N, d_in, d_out)
+        dim(grad_out_W) = (N, d_in, d_out, d_out)
+        dim(grad_out_bias) = (N, d_out)
+        dim(grad_loss_out) = (N, d_out)
+        """
+        assert all(hasattr(self, attr) for attr in ("N", "x", "value")), "The forward pass tracked must be computed before the gradient."
+
+        self.grad_out_in: np.ndarray[float] = np.eye(self.d_in)[None, :, :].repeat(self.N, axis=0)
+        self.grad_loss_in: np.ndarray[float] = np.sum(grad_loss_out[:, None, :] * self.grad_out_in, axis=2)
+
+        return self.grad_loss_in
+    
+            
     def grad_loss_parameters(self) -> None:
         """
         """

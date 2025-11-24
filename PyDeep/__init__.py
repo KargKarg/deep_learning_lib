@@ -5,12 +5,18 @@ from .modules import (
     Linear,
     Sigmoid,
     Tanh,
-    Softmax
+    Softmax,
+    LogSoftmax,
+    Identity,
+    Concat
 )
 
 from .losses import (
     MSE,
-    BCE
+    BCE,
+    CE,
+    LogCE,
+    SummedLoss
 )
 
 from .optimizers import (
