@@ -94,7 +94,12 @@ class Sequential(Module):
     def __getitem__(self, index: int | slice) -> Module:
         """
         """
-        return Sequential(*self.modules[index])
+        elems = self.modules[index]
+
+        if not isinstance(index, slice):
+            return elems
+        
+        return Sequential(*elems)
 
 
     @property
@@ -139,6 +144,12 @@ class Concat(Module):
         """
         for module in self.modules:
             yield module
+
+
+    def __getitem__(self, index: int | slice) -> Module:
+        """
+        """
+        return self.modules[index]
     
 class Linear(Module):
     """
@@ -481,6 +492,57 @@ class Identity(Module):
         return self.grad_loss_in
     
             
+    def grad_loss_parameters(self) -> None:
+        """
+        """
+        return None
+    
+
+class Duplicate(Module):
+    """
+    """
+
+
+    def __init__(self, d_in: int, times: int = 2) -> None:
+        """
+        """
+        super().__init__(d_in, d_in*times)
+        self.times = times
+
+
+    def forward(self, x: np.ndarray[float], track: float = True) -> np.ndarray[float]:
+        """
+        """
+        match track:
+
+            case True:
+
+                self.N: int = x.shape[0]
+                self.x: np.ndarray[float] = np.copy(x)
+                self.value: np.ndarray[float] = np.repeat(x, self.times, axis=1).copy()
+
+                return self.value
+            
+            case False:
+
+                return np.repeat(x, self.times, axis=1)
+            
+
+    def backward(self, grad_loss_out: np.ndarray[float]) -> None:
+        """
+        dim(grad_out_in) = (N, d_in, d_out)
+        dim(grad_out_W) = (N, d_in, d_out, d_out)
+        dim(grad_out_bias) = (N, d_out)
+        dim(grad_loss_out) = (N, d_out)
+        """
+        assert all(hasattr(self, attr) for attr in ("N", "x", "value")), "The forward pass tracked must be computed before the gradient."
+
+        self.grad_out_in: np.ndarray[float] = np.concatenate([np.eye(self.d_in) for _ in range(self.times)], axis=1)[None, :, :].repeat(self.N, axis=0)
+        self.grad_loss_in: np.ndarray[float] = np.sum(grad_loss_out[:, None, :] * self.grad_out_in, axis=2)
+
+        return self.grad_loss_in
+
+
     def grad_loss_parameters(self) -> None:
         """
         """

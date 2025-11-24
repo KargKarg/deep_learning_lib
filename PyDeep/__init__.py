@@ -8,7 +8,8 @@ from .modules import (
     Softmax,
     LogSoftmax,
     Identity,
-    Concat
+    Concat,
+    Duplicate
 )
 
 from .losses import (

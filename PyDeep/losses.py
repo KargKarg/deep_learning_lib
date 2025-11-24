@@ -225,10 +225,10 @@ class SummedLoss(Loss):
         """
         """
         assert x.shape[-1] == sum([module.d_in for module in self.modules]), ""
-        return np.sum([weight*module(x[:, (dim_past := sum([m.d_in for m in self.modules[:i]])) : dim_past + module.d_in], y[:, dim_past : dim_past + module.d_in], track) for i, (module, weight) in enumerate(zip(self.modules, self.weights))])/sum(self.weights)
+        return np.sum([weight*module(x[:, (dim_past := sum([m.d_in for m in self.modules[:i]])) : dim_past + module.d_in], y[:, dim_past : dim_past + module.d_in], track) for i, (module, weight) in enumerate(zip(self.modules, self.weights))])
     
 
     def backward(self) -> np.ndarray[float]:
         """
         """
-        return np.concatenate([(weight/sum(self.weights))*module.backward() for module, weight in zip(self.modules, self.weights)], axis=1)
+        return np.concatenate([weight*module.backward() for module, weight in zip(self.modules, self.weights)], axis=1)
