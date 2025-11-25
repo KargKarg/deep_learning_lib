@@ -1,6 +1,5 @@
-import numpy as np
 from abc import ABC, abstractmethod
-from .modules import Module, Concat
+from .modules import Module
 
 
 class Optimizer(ABC):
@@ -54,3 +53,5 @@ class SGD(Optimizer):
                 continue
 
             module.parameters = {p_name: (p_value - self.lr*grad[p_name]) for p_name, p_value in module.parameters.items()}
+
+        return None
