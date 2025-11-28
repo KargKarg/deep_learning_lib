@@ -3,6 +3,7 @@ from . import utils
 from .modules import (
     Sequential,
     Linear,
+    Embedding,
     Sigmoid,
     Tanh,
     ReLU,

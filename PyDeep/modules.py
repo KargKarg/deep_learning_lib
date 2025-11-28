@@ -235,6 +235,97 @@ class Linear(Module):
         }
 
 
+class Embedding(Module):
+    """
+    """
+
+
+    def __init__(self, d_in: int, d_out: int, K: int = 1, bias: bool = True, drop: float = 0.) -> None:
+        """"
+        """
+        
+        super().__init__(d_in*K, d_out*K)
+        np.random.seed(self.seed)
+
+        self.has_bias = bias
+        self.drop = drop
+        self.K = K
+
+        match bias:
+
+            case True:
+
+                self.parameters = {
+                    "W": np.random.normal(size=(d_in, d_out)),
+                    "b": np.random.normal(size=(1,))[0]
+                }
+
+            case False:
+
+                self.parameters = {
+                    "W": np.random.normal(size=(d_in, d_out)),
+                    "b": 0
+                }
+
+        return None
+    
+
+    def forward(self, x: np.ndarray[float], track: bool = True) -> np.ndarray[float]:
+        """
+        dim(X) = (N, d_in*K)
+        dim(W) = (d_in, d_out)
+        """
+        match track:
+
+            case True:
+
+                self.x: np.ndarray[float] = np.copy(x)
+                self.value: np.ndarray[float] = (np.dot(x.reshape(x.shape[0], self.K, self.d_in//self.K), self.parameters["W"]) + self.parameters["b"]).reshape(x.shape[0], self.d_out)
+
+                return self.value.reshape(x.shape[0], self.d_out)
+            
+            case False:
+
+                return (np.dot(x.reshape(x.shape[0], self.K, self.d_in//self.K), self.parameters["W"]) + self.parameters["b"]).reshape(x.shape[0], self.d_out)
+
+
+    def backward(self, grad_loss_out: np.ndarray[float]) -> None:
+        """
+        dim(grad_out_in) = (N, d_in, d_out)
+        dim(grad_out_W) = (N, d_in, d_out, d_out)
+        dim(grad_out_bias) = (N, d_out)
+        dim(grad_loss_out) = (N, d_out)
+        """
+        assert all(hasattr(self, attr) for attr in ("x", "value")), "The forward pass tracked must be computed before the gradient."
+
+        self.grad_out_in: np.ndarray[float] = block_diag(*([self.parameters["W"]] * self.K))
+
+        d_in: int = self.parameters["W"].shape[0]
+        d_out: int = self.parameters["W"].shape[1]
+
+        self.grad_out_W: np.ndarray[float] = (self.x.reshape(-1, self.K, d_in)[..., None, None] * np.concatenate([np.concatenate([np.eye(d_out)[None, ...] for _ in range(d_in)], axis=0)[None, ...] for _ in range(self.K)], axis=0)[None, ...]).transpose(0, 2, 3, 1, 4).reshape(-1, d_in, d_out, d_out*self.K)
+
+        self.grad_out_bias: np.ndarray[float] = np.ones(shape=(self.x.shape[0], d_out*self.K))
+        self.grad_loss_in: np.ndarray[float] = np.sum(grad_loss_out[:, None, :] * self.grad_out_in, axis=2)
+
+        self.grad_loss_out = np.copy(grad_loss_out)
+
+        return self.grad_loss_in
+
+
+    def grad_loss_parameters(self) -> dict[str: np.ndarray[float] | float]:
+        """
+        """
+        d_in: int = self.parameters["W"].shape[0]
+        d_out: int = self.parameters["W"].shape[1]
+
+        dropped_weights = np.tile(np.random.binomial(n=1, p=(1 - self.drop), size=(d_out,)), (d_in, 1)).copy()
+        return {
+            "W": np.mean(np.sum((self.grad_out_W*self.grad_loss_out[:, None, None, :]), axis=3), axis=0)*dropped_weights,
+            "b": int(self.has_bias)*np.mean(np.sum(self.grad_loss_out*self.grad_out_bias, axis=1), axis=0)
+        }
+    
+
 class Sigmoid(Module):
     """
     """
