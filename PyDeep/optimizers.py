@@ -35,23 +35,26 @@ class SGD(Optimizer):
     def step(self) -> None:
         """
         """
+
+        def update(module, grad) -> None:
+            """
+            """
+            if grad is None:    return None
+
+            if type(grad) == dict:
+                module.parameters = {p_name: (p_value - self.lr*grad[p_name]) for p_name, p_value in module.parameters.items()}
+                return None
+            
+            if type(grad) == list:
+                for sub_module, sub_grad in zip(module[::-1], grad[::-1]):
+                    update(sub_module, sub_grad)
+                return None
+
             
         grad_loss_parameters = self.model.grad_loss_parameters()
 
-        for module, grad in zip(self.model[::-1], grad_loss_parameters):
+        for module, grad in zip(self.model[::-1], grad_loss_parameters[::-1]):
             
-            if grad is None:    continue
-
-            if module.__class__.__name__ == "Concat":
-
-                for sub_module, sub_grad in zip(module, grad):
-
-                    if sub_grad is None:    continue
-                    
-                    sub_module.parameters = {p_name: (p_value - self.lr*sub_grad[p_name]) for p_name, p_value in sub_module.parameters.items()}
-
-                continue
-
-            module.parameters = {p_name: (p_value - self.lr*grad[p_name]) for p_name, p_value in module.parameters.items()}
+            update(module, grad)
 
         return None

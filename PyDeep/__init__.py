@@ -16,7 +16,9 @@ from .modules import (
     LogSoftmax,
     Identity,
     Concat,
-    Duplicate
+    Duplicate,
+    Attention,
+    # MultiHeadAttention
 )
 
 from .losses import (

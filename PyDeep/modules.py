@@ -82,7 +82,7 @@ class Sequential(Module):
     def grad_loss_parameters(self) -> list[dict[str: np.ndarray[float] |float] | None]:
         """
         """
-        return [module.grad_loss_parameters() for module in self.modules[::-1]]
+        return [module.grad_loss_parameters() for module in self.modules]
 
 
     def __iter__(self) -> Iterator[Module]:
@@ -963,3 +963,242 @@ class Softplus(Module):
         """
         """
         return None
+    
+
+class MatMul(Module):
+    """
+    """
+
+    def __init__(self, N: int, M: int, P: int, left_first: bool = True) -> None:
+        """
+        """
+        self.N, self.M, self.P = N, M, P
+        self.left_first = left_first
+        super().__init__((N*M) + (M*P), (N*P))
+        return None
+    
+
+    def forward(self, x: np.ndarray[float], track: bool = True) -> np.ndarray[float]:
+        """
+        dim(X) = (N, d_in)
+        """
+
+        match track:
+
+            case True:
+                
+                self.x = np.copy(x)
+
+                if self.left_first:
+                    self.left: np.ndarray[float] = np.copy(x)[:, :self.N*self.M].reshape(-1, self.N, self.M)
+                    self.right: np.ndarray[float] = np.copy(x)[:, self.N*self.M:].reshape(-1, self.M, self.P)
+
+                else:
+                    self.left: np.ndarray[float] = np.copy(x)[:, self.M*self.P:].reshape(-1, self.N, self.M)
+                    self.right: np.ndarray[float] = np.copy(x)[:, :self.M*self.P].reshape(-1, self.M, self.P)
+
+                self.value: np.ndarray[float] = np.matmul(self.left, self.right).reshape(-1, self.N*self.P)
+
+                return self.value
+            
+            case False:
+
+                return np.matmul(x[:, :self.N*self.M].reshape(-1, self.N, self.M), x[:, self.N*self.M:].reshape(-1, self.M, self.P)).reshape(-1, self.N*self.P)
+
+
+    def backward(self, grad_loss_out: np.ndarray[float]) -> None:
+        """
+        dim(grad_out_in) = (N, d_in, d_out)
+        dim(grad_out_W) = (N, d_in, d_out, d_out)
+        dim(grad_out_bias) = (N, d_out)
+        dim(grad_loss_out) = (N, d_out)
+        """
+        assert all(hasattr(self, attr) for attr in ("x", "value")), "The forward pass tracked must be computed before the gradient."
+
+        self.grad_out_left_in: np.ndarray[float] = (self.right[:, None, :, None, :] * np.eye(self.N)[None, :, None, :, None]).reshape(-1, self.N*self.M, self.N*self.P)
+        self.grad_out_right_in: np.ndarray[float] = (self.left.transpose(0, 2, 1)[:, :, None, :, None] * np.eye(self.P)[None, None, :, None, :]).reshape(-1, self.M*self.P, self.N*self.P)
+
+        self.grad_out_in: np.ndarray[float] = np.concatenate([self.grad_out_left_in, self.grad_out_right_in], axis=1) if self.left_first else np.concatenate([self.grad_out_right_in, self.grad_out_left_in], axis=1)
+
+        self.grad_loss_in: np.ndarray[float] = np.sum(grad_loss_out[:, None, :] * self.grad_out_in, axis=2)
+
+        return self.grad_loss_in
+
+
+    def grad_loss_parameters(self) -> None:
+        """
+        """
+        return None
+    
+
+class Transposition(Module):
+    """
+    """
+
+    def __init__(self, N: int, M: int) -> None:
+        """
+        """
+        self.N, self.M = N, M
+        super().__init__(N*M, N*M)
+        return None
+    
+
+    def forward(self, x: np.ndarray[float], track: bool = True) -> np.ndarray[float]:
+        """
+        dim(X) = (N, d_in)
+        """
+
+        match track:
+
+            case True:
+                
+                self.x = np.copy(x)
+                self.value: np.ndarray[float] = self.x.reshape(-1, self.N, self.M).transpose(0, 2, 1).reshape(-1, self.M*self.N)
+
+                return self.value
+            
+            case False:
+
+                return x.reshape(-1, self.N, self.M).transpose(0, 2, 1).reshape(-1, self.M*self.N)
+            
+
+    def backward(self, grad_loss_out: np.ndarray[float]) -> None:
+        """
+        dim(grad_out_in) = (N, d_in, d_out)
+        dim(grad_out_W) = (N, d_in, d_out, d_out)
+        dim(grad_out_bias) = (N, d_out)
+        dim(grad_loss_out) = (N, d_out)
+        """
+        assert all(hasattr(self, attr) for attr in ("x", "value")), "The forward pass tracked must be computed before the gradient."
+
+        self.grad_out_in: np.ndarray[float] = np.eye(self.N*self.M)[None, :, :].repeat(self.x.shape[0], axis=0).reshape(-1, self.N*self.M, self.N, self.M).transpose(0, 1, 3, 2).reshape(-1, self.N*self.M, self.N*self.M)
+
+        self.grad_loss_in: np.ndarray[float] = np.sum(grad_loss_out[:, None, :] * self.grad_out_in, axis=2)
+
+        return self.grad_loss_in
+    
+
+    def grad_loss_parameters(self) -> None:
+        """
+        """
+        return None
+
+
+class ConstMul(Module):
+    """
+    """
+
+    def __init__(self, d_in: int, b: float) -> None:
+        """
+        """
+        super().__init__(d_in, d_in)
+        self.b = b
+        return None
+    
+
+    def forward(self, x: np.ndarray[float], track: bool = True) -> np.ndarray[float]:
+        """
+        dim(X) = (N, d_in)
+        """
+
+        match track:
+
+            case True:
+                
+                self.x: np.ndarray[float] = np.copy(x)
+                self.value: np.ndarray[float] = self.x*self.b
+
+                return self.value
+            
+            case False:
+
+                return x*self.b
+
+
+    def backward(self, grad_loss_out: np.ndarray[float]) -> None:
+        """
+        dim(grad_out_in) = (N, d_in, d_out)
+        dim(grad_out_W) = (N, d_in, d_out, d_out)
+        dim(grad_out_bias) = (N, d_out)
+        dim(grad_loss_out) = (N, d_out)
+        """
+        assert all(hasattr(self, attr) for attr in ("x", "value")), "The forward pass tracked must be computed before the gradient."
+
+        self.grad_out_in: np.ndarray[float] = np.concatenate([np.eye(self.d_in)[None, ...]*self.b for _ in range(self.x.shape[0])], axis=0)
+        self.grad_loss_in: np.ndarray[float] = np.sum(grad_loss_out[:, None, :] * self.grad_out_in, axis=2)
+
+        return self.grad_loss_in
+
+
+    def grad_loss_parameters(self) -> None:
+        """
+        """
+        return None
+    
+
+
+class Attention(Sequential):
+    """
+    """
+
+    def __init__(self, L: int, d_in: int, embedding_size: int, bias: bool = True, drop: float = 0.) -> None:
+        """
+        """
+        self.triple: Duplicate = Duplicate(d_in=d_in*L, times=3)
+
+        self.Q: Embedding = Embedding(d_in=d_in, d_out=embedding_size, K=L, bias=bias, drop=drop)
+        self.K: Embedding = Embedding(d_in=d_in, d_out=embedding_size, K=L, bias=bias, drop=drop)
+        self.V: Embedding = Embedding(d_in=d_in, d_out=embedding_size, K=L, bias=bias, drop=drop)
+
+        super().__init__(
+            self.triple,
+
+            Concat(
+                self.Q,
+                self.K,
+                self.V
+            ),
+
+            Concat(
+                Identity(L*embedding_size),
+                Transposition(N=L, M=embedding_size),
+                Identity(L*embedding_size)
+            ),
+
+            Concat(
+                MatMul(N=L, M=embedding_size, P=L),
+                Identity(L*embedding_size)
+            ),
+
+            Concat(
+                ConstMul(L*L, 1/np.sqrt(embedding_size)),
+                Identity(L*embedding_size)
+            ),
+
+            Concat(
+                *[Softmax(L) for _ in range(L)],
+                Identity(L*embedding_size)
+            ),
+
+            MatMul(N=L, M=L, P=embedding_size)
+        )
+
+        return None
+    
+    @property
+    def attention_matrix(self) -> np.ndarray[float]:
+        """
+        """
+        return self[-1].left
+    
+
+# class MultiHeadAttention(Concat):
+#     """
+#     """
+
+#     def __init__(self, L: int, d_in: int, parameters: list[tuple[int, bool, float]]) -> None:
+#         """
+#         """
+#         super(MultiHeadAttention, self).__init__(
+#             *[Attention(L=L, d_in=d_in, embedding_size=embedding_size, bias=bias, drop=drop) for (embedding_size, bias, drop) in parameters]
+#         )
